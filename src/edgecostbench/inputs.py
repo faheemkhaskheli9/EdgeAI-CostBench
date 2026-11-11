@@ -70,6 +70,7 @@ def build_inputs(model_inputs, shape_overrides: dict[str, tuple[int, ...]],
                 feeds[name] = rng.standard_normal(shape).astype(dtype)
             else:
                 feeds[name] = rng.integers(0, 2 if dtype is np.bool_ else 8, size=shape).astype(dtype)
+    symbolic_dimensions: dict[str, int] = {}
     for name, meta in metadata.items():
         array = feeds[name]
         expected = np.dtype(dtypes[meta.type])
@@ -82,6 +83,10 @@ def build_inputs(model_inputs, shape_overrides: dict[str, tuple[int, ...]],
         for expected_dim, actual_dim in zip(meta.shape, array.shape):
             if isinstance(expected_dim, int) and expected_dim > 0 and expected_dim != actual_dim:
                 raise ValueError(f"{name}: model expects dimension {expected_dim}, got {actual_dim}")
+            if isinstance(expected_dim, str) and expected_dim:
+                previous = symbolic_dimensions.setdefault(expected_dim, actual_dim)
+                if previous != actual_dim:
+                    raise ValueError(f"{name}: symbolic dimension {expected_dim!r} must match {previous}, got {actual_dim}")
         if any(dim <= 0 for dim in array.shape):
             raise ValueError(f"{name}: empty tensor dimensions are not supported")
         if not array.flags.c_contiguous:

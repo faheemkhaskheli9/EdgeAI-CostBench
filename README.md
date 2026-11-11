@@ -57,7 +57,28 @@ python -m pip install -e '.[test]'
 python -m pytest -q
 ```
 
-For an optional end-to-end ONNX test, install ONNX and ONNX Runtime with `python -m pip install '.[cpu]' onnx` and run the same test suite.
+For an optional **real CPU ONNX Runtime integration test**, install extras and generate a
+deterministic Add model with a dynamic batch dimension and valid named NPZ feeds:
+
+```bash
+python -m pip install -e '.[cpu,test]' onnx
+python examples/make_smoke_fixture.py --out-dir /tmp/edgebench-smoke
+edgecostbench run --model /tmp/edgebench-smoke/add.onnx \
+  --inputs-npz /tmp/edgebench-smoke/add-inputs.npz \
+  --provider CPUExecutionProvider --warmup 10 --runs 100 \
+  --out /tmp/edgebench-smoke/report.json
+python -m pytest -q tests/test_onnx_integration.py
+python --version
+python -m pip show numpy onnx onnxruntime
+```
+
+The test checks expected numeric output and requested provider activation, NPZ
+shape/dtype failures, symbolic dimensions shared across inputs, and dynamic-shape
+overrides. The integration module **skips** when ONNX authoring or runtime packages
+are missing; a skipped test is not proof of hardware compatibility. The toy Add
+fixture is for pipeline correctness, not representative model accuracy or performance.
+Capture device, runtime, OS, and environment metadata alongside a real-device
+benchmark before publishing hardware conclusions.
 
 ## Next milestones
 
