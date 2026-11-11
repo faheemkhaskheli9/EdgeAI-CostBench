@@ -34,9 +34,25 @@ def load_results(paths: list[str]) -> list[dict]:
                 raise ValueError(f"invalid performance measurement in {path}")
             if not isinstance(items_per_call, int) or isinstance(items_per_call, bool) or items_per_call < 1:
                 raise ValueError(f"invalid items_per_call in {path}")
+            workload = result.get("workload")
+            correctness = result.get("correctness") or {}
+            if workload is not None and not isinstance(workload, dict):
+                raise ValueError(f"invalid workload metadata in {path}")
+            if not isinstance(correctness, dict):
+                raise ValueError(f"invalid correctness metadata in {path}")
+            check_status = correctness.get("status", "not_evaluated")
+            if workload is not None:
+                workload_sha = workload.get("sha256")
+                if not isinstance(workload_sha, str) or len(workload_sha) != 64 or any(
+                        character not in "0123456789abcdef" for character in workload_sha):
+                    raise ValueError(f"invalid workload digest in {path}")
+                if check_status != "passed":
+                    raise ValueError(f"unverified workload result in {path}: reference check has not passed")
+            else:
+                workload_sha = None
             # Legacy schema-v1 reports lack feed identity. Keep each separate: even
             # matching shape/seed is not proof of matching actual input values.
-            key = ((result["model"]["sha256"], fingerprint, tensors, items_per_call)
+            key = ((result["model"]["sha256"], fingerprint, tensors, items_per_call, workload_sha)
                    if fingerprint is not None else ("unverified", index))
             if key not in cohorts:
                 cohorts[key] = f"G{len(cohorts) + 1}"
@@ -47,6 +63,11 @@ def load_results(paths: list[str]) -> list[dict]:
                 "input_verified": fingerprint is not None,
                 "model_sha256": result["model"]["sha256"],
                 "input_sha256": fingerprint,
+                "workload_id": workload.get("id") if workload is not None else None,
+                "workload_sha256": workload_sha,
+                "task": workload.get("task") if workload is not None else None,
+                "unit_of_work": workload.get("unit_of_work") if workload is not None else None,
+                "reference_check": check_status,
                 "provider": result["runtime"]["requested_provider"],
                 "hardware": result["hardware"]["machine"],
                 "input_source": input_meta["source"],
@@ -98,11 +119,11 @@ def render_comparison(rows: list[dict], format_name: str = "table",
         return output.getvalue().rstrip("\n")
     if format_name != "table":
         raise ValueError(f"unknown format {format_name}")
-    headers = ("Group", "Rank", "Result", "Provider", "p50 ms", "p95 ms", "items/s", "RSS MB", "Cost/1M calls")
+    headers = ("Group", "Rank", "Checked", "Result", "Provider", "p50 ms", "p95 ms", "items/s", "RSS MB", "Cost/1M calls")
     display = []
     for row in ranked:
         price = row["estimated_electricity_cost_per_million_calls"]
-        display.append((row["cohort"], str(row["rank_in_cohort"]), Path(row["result_file"]).name,
+        display.append((row["cohort"], str(row["rank_in_cohort"]), row["reference_check"], Path(row["result_file"]).name,
                         row["provider"], f"{row['latency_p50_ms']:.3f}", f"{row['latency_p95_ms']:.3f}",
                         f"{row['items_per_second']:.2f}",
                         "n/a" if row["peak_rss_mb"] is None else f"{row['peak_rss_mb']:.1f}",
@@ -111,7 +132,7 @@ def render_comparison(rows: list[dict], format_name: str = "table",
     lines = ["  ".join(value.ljust(widths[i]) for i, value in enumerate(headers)),
              "  ".join("-" * width for width in widths)]
     lines.extend("  ".join(value.ljust(widths[i]) for i, value in enumerate(row)) for row in display)
-    lines.append("Groups require identical model, actual input content, tensor layout and items/call. Different providers/devices can be compared within a group.")
+    lines.append("Groups require matching model, input content, batch and workload manifest. Reference checks do not establish real-world accuracy.")
     if len({row["cohort"] for row in ranked}) > 1:
         lines.append("WARNING: Cross-group comparison is not valid; displayed ranks are within each group."
                      if not allow_incomparable else

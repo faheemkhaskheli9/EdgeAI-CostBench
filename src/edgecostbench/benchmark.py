@@ -13,6 +13,7 @@ from .hardware import ProcessMemorySampler, system_info
 from .inputs import build_inputs
 from .identity import fingerprint_feeds
 from .metrics import summarize_latencies
+from .workloads import check_reference, check_tensors, load_manifest
 
 
 def sha256_file(path: str) -> str:
@@ -30,7 +31,7 @@ def run_benchmark(*, model_path: str, provider: str = "CPUExecutionProvider",
                   power_watts: float | None = None,
                   electricity_price_per_kwh: float | None = None,
                   currency: str = "USD", intra_op_threads: int | None = None,
-                  session_factory=None) -> dict:
+                  manifest_path: str | None = None, session_factory=None) -> dict:
     # Reject invalid cost inputs before expensive model initialization/inference.
     estimate_cost(0, power_watts, electricity_price_per_kwh, currency)
     if not Path(model_path).is_file():
@@ -39,6 +40,10 @@ def run_benchmark(*, model_path: str, provider: str = "CPUExecutionProvider",
         raise ValueError("warmup must be >= 0; runs and items_per_call must be positive")
     if intra_op_threads is not None and intra_op_threads < 1:
         raise ValueError("intra_op_threads must be positive")
+    workload, reference_npz = None, None
+    if manifest_path is not None:
+        workload, inputs_npz, reference_npz = load_manifest(manifest_path, model_path, inputs_npz,
+                                                           items_per_call)
     if session_factory is None:
         try:
             import onnxruntime as ort
@@ -59,6 +64,11 @@ def run_benchmark(*, model_path: str, provider: str = "CPUExecutionProvider",
     if provider not in actual_providers:
         raise RuntimeError(f"requested provider {provider} not active; actual: {actual_providers}")
     feeds = build_inputs(session.get_inputs(), shape_overrides or {}, seed=seed, npz_path=inputs_npz)
+    if workload is not None:
+        check_tensors(feeds, workload)
+        correctness = check_reference(session, feeds, reference_npz, workload)
+    else:
+        correctness = {"status": "not_evaluated", "note": "No reference workload; task correctness and accuracy are unknown."}
     for _ in range(warmup):
         session.run(None, feeds)
     durations: list[float] = []
@@ -90,6 +100,9 @@ def run_benchmark(*, model_path: str, provider: str = "CPUExecutionProvider",
             "seed": seed if inputs_npz is None else None,
             "tensors": {name: {"shape": list(value.shape), "dtype": str(value.dtype)} for name, value in feeds.items()},
         },
+        "workload": ({key: value for key, value in workload.items() if key not in ("tensors", "atol", "rtol")}
+                     if workload is not None else None),
+        "correctness": correctness,
         "measurement": {
             "method": "sequential synchronous calls, warmup excluded, no model load or input generation in timed region",
             "warmup_runs": warmup, **summary,

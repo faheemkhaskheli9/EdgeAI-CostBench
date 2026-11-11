@@ -16,6 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--provider", default="CPUExecutionProvider", help="ONNX Runtime execution provider")
     run.add_argument("--shape", action="append", default=[], help="override dynamic input shape: NAME=1x3x224x224; repeatable")
     run.add_argument("--inputs-npz", help="NPZ containing matching named input tensors")
+    run.add_argument("--manifest", help="versioned workload JSON: pins model, input NPZ and reference outputs")
     run.add_argument("--warmup", type=int, default=10)
     run.add_argument("--runs", type=int, default=100)
     run.add_argument("--seed", type=int, default=42)
@@ -72,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
                 inputs_npz=args.inputs_npz, warmup=args.warmup, runs=args.runs, seed=args.seed,
                 items_per_call=args.items_per_call, power_watts=args.power_watts,
                 electricity_price_per_kwh=args.electricity_price, currency=args.currency,
-                intra_op_threads=args.intra_op_threads,
+                intra_op_threads=args.intra_op_threads, manifest_path=args.manifest,
             )
             rendered = json.dumps(report, indent=2, sort_keys=True)
         elif args.command == "compare":

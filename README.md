@@ -2,7 +2,7 @@
 
 Reproducible **edge AI inference benchmarks** for comparing affordable CPU/GPU devices, ONNX models, and assumed electricity costs. Record actual inference latency/throughput, process memory, system metadata, input configuration, model SHA-256, and explicitly labeled **estimated** energy costs.
 
-> **Status: v0.1 MVP.** ONNX Runtime CPU and installed execution providers are supported. No energy sensor telemetry, accuracy validation, GPU memory profiling, or capital/hosting cost model yet. Results are local experiments, **not** a hardware leaderboard.
+> **Status: v0.1 MVP.** Includes versioned input/reference workload checks and an assumption-based ownership cost model. No real-world accuracy evaluation, measured power telemetry, GPU memory profiling, or standardized hardware leaderboard yet. Real-hardware ONNX tests are still pending.
 
 ## Install
 
@@ -37,6 +37,40 @@ edgecostbench compare results/cpu.json --format csv --out results/summary.csv
 ```
 
 You can also run without installation using `PYTHONPATH=src python -m edgecostbench --help`. `edgecostbench run` requires NumPy and ONNX Runtime. `psutil` is optional for process RSS sampling.
+
+## Versioned workloads and correctness checks
+
+Generate two reproducible demonstration suites (224x224 preprocessed RGB image with
+average pooling; 128-token sequence with an attention mask and masked sum):
+
+```bash
+python -m pip install -e '.[cpu,test]' onnx
+python examples/make_workload_fixtures.py --out-dir /tmp/edgebench-workloads
+edgecostbench run --model /tmp/edgebench-workloads/vision_pool.onnx \
+  --manifest /tmp/edgebench-workloads/vision-pool-v1.json --runs 50 \
+  --out results/vision.json
+edgecostbench run --model /tmp/edgebench-workloads/nlp_masked_sum.onnx \
+  --manifest /tmp/edgebench-workloads/nlp-masked-sum-v1.json --runs 50 \
+  --out results/nlp.json
+edgecostbench compare results/vision.json results/nlp.json
+```
+
+The version-1 JSON manifest contains the workload ID, task, unit of work,
+exact model SHA-256, named input tensor shapes/dtypes, input and reference NPZ
+SHA-256, number of samples per call, and reference-check tolerances. Relative
+artifact paths resolve relative to the manifest, not the terminal's directory.
+Reference outputs are checked **before** warmup or timing; failed checks block
+benchmark results. Reports store correctness and throughput separately.
+Comparison cohorts now include manifest identity; identical tensor shapes with
+different reference contracts are not comparable. Unmanifested runs retain
+their historical throughput behavior but report correctness as not evaluated.
+
+**Important:** These tiny fixture models verify data/runner correctness only.
+Their tensor shapes resemble vision/NLP preprocessing, but their simple
+operators are not a substitute for actual ResNet, YOLO, or transformer workloads.
+Passing a known-output reference check is not classification accuracy or
+semantic task quality. Do not treat benchmark outputs as model-accuracy claims.
+See docs/plans/02-standardized-workloads.md for the next phases.
 
 ## Metrics and methodology
 
@@ -119,7 +153,7 @@ useful fractions or watts as sensor measurements or accuracy scores.
 
 1. **Measured energy:** opt-in NVML and external-power-meter telemetry with uncertainty/coverage and provenance.
 2. **Hardware-cost modeling:** measured watts, utilization, amortized device price and duty cycle; compute cost per useful inference.
-3. **Accuracy + workloads:** fixed public model/task suites with representative inputs and correctness metrics; repeated trials and environmental controls.
+3. **Accuracy + workloads:** add real public model/task suites with dataset-backed quality metrics, repeated trials and environmental controls (demonstration reference checks implemented).
 4. **Publishing:** opt-in standardized, auditable benchmark manifests and reproducible hardware comparison dashboard.
 
 Community submissions should include complete model/runtime/hardware metadata, dataset and measurement protocol; **do not publish synthetic-input throughput as real-world accuracy or efficiency**.
