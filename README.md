@@ -29,8 +29,10 @@ edgecostbench run --model model.onnx --shape images=1x3x224x224 --runs 100 \
 edgecostbench run --model model.onnx --inputs-npz representative_inputs.npz \
   --provider CPUExecutionProvider --out results/representative.json
 
-# Compare JSON files (sorting by p50 call latency):
+# Compare results. Only matching workloads receive a valid within-group rank:
 edgecostbench compare results/cpu.json results/representative.json
+# Explicitly force a cross-group latency sort (NOT a valid model ranking):
+edgecostbench compare results/cpu.json results/representative.json --allow-incomparable
 edgecostbench compare results/cpu.json --format csv --out results/summary.csv
 ```
 
@@ -46,7 +48,7 @@ You can also run without installation using `PYTHONPATH=src python -m edgecostbe
 - ONNX Runtime may assign individual operators to different execution providers. Requested/active providers are recorded; per-op placement isn't measured. GPU run times assume synchronous `session.run()` completion.
 - Performance results **do not measure accuracy, thermal throttling over extended periods, concurrent capacity, setup time, amortized hardware prices, cloud prices, or idle power**. Compare only runs with equivalent input tensors, batching, and machine/environment.
 
-Results use stable `schema_version: 1` JSON; `compare` supports table, JSON, and CSV. The stored model SHA-256 and runtime/provider/hardware metadata help catch comparisons between incompatible experiments. No inference input contents are stored; NPZ paths may include private local paths, so review reports before publishing.
+Results use stable `schema_version: 1` JSON; `compare` supports table, JSON, and CSV. Each new run fingerprints the *actual tensor feed contents* (names, shapes, dtypes, and values), in addition to its model SHA-256. Comparisons group results only when model hash, input fingerprint, tensor layout, and `items_per_call` match. A CPU versus GPU comparison is possible inside one group. Legacy reports without input fingerprints are isolated, even when shapes look identical. JSON/CSV include group IDs and within-group ranks. `--allow-incomparable` forces a cross-group sort **only for exploratory viewing** and must never be used as an evidence-based leaderboard ranking. The stored model SHA-256 and runtime/provider/hardware metadata help catch comparisons between incompatible experiments. No inference input contents are stored; NPZ paths may include private local paths, so review reports before publishing.
 
 ## Development
 

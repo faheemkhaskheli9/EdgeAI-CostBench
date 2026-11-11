@@ -11,6 +11,7 @@ from . import __version__
 from .cost import estimate_cost
 from .hardware import ProcessMemorySampler, system_info
 from .inputs import build_inputs
+from .identity import fingerprint_feeds
 from .metrics import summarize_latencies
 
 
@@ -83,6 +84,8 @@ def run_benchmark(*, model_path: str, provider: str = "CPUExecutionProvider",
         "hardware": system_info(),
         "input": {
             "source": "npz" if inputs_npz else "synthetic",
+            "sha256": fingerprint_feeds(feeds),
+            "npz_sha256": sha256_file(inputs_npz) if inputs_npz else None,
             "npz_path": inputs_npz,
             "seed": seed if inputs_npz is None else None,
             "tensors": {name: {"shape": list(value.shape), "dtype": str(value.dtype)} for name, value in feeds.items()},

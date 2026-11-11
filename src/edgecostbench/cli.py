@@ -29,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("results", nargs="+", help="run output JSON paths")
     compare.add_argument("--format", choices=("table", "json", "csv"), default="table")
     compare.add_argument("--out", help="write rendered comparison to this path")
+    compare.add_argument("--allow-incomparable", action="store_true",
+                         help="force global latency sorting across incompatible workloads (invalid for benchmarking)")
     return parser
 
 
@@ -48,8 +50,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             rendered = json.dumps(report, indent=2, sort_keys=True)
         else:
-            from .report import load_results, render_comparison
-            rendered = render_comparison(load_results(args.results), args.format)
+            from .report import comparison_warnings, load_results, render_comparison
+            rows = load_results(args.results)
+            for warning in comparison_warnings(rows):
+                print(f"warning: {warning}", file=sys.stderr)
+            rendered = render_comparison(rows, args.format, allow_incomparable=args.allow_incomparable)
         if args.out:
             output = Path(args.out)
             output.parent.mkdir(parents=True, exist_ok=True)
