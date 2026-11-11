@@ -31,7 +31,33 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--out", help="write rendered comparison to this path")
     compare.add_argument("--allow-incomparable", action="store_true",
                          help="force global latency sorting across incompatible workloads (invalid for benchmarking)")
+    economics = sub.add_parser("economics", help="estimate annualized edge TCO from a saved benchmark")
+    economics.add_argument("--result", required=True, help="saved run JSON with actual measured items/s")
+    economics.add_argument("--device-price", type=float, required=True)
+    economics.add_argument("--lifespan-years", type=float, required=True)
+    economics.add_argument("--maintenance-per-year", type=float, default=0.0)
+    economics.add_argument("--idle-watts", type=float, required=True, help="assumed watts when not inferring")
+    economics.add_argument("--load-watts", type=float, required=True, help="assumed watts during inference")
+    economics.add_argument("--electricity-price", type=float, required=True, help="tariff per kWh")
+    economics.add_argument("--utilization", type=float, required=True, help="fraction of year inferring, 0..1")
+    economics.add_argument("--useful-fraction", type=float, required=True, help="assumed correct/useful fraction, (0,1]")
+    economics.add_argument("--cloud-price-per-million", type=float, help="cloud cost per 1M API calls")
+    economics.add_argument("--cloud-useful-fraction", type=float, help="assumed cloud useful fraction, else equal to edge")
+    economics.add_argument("--sensitivity-utilizations", default="0.1,0.5,0.9")
+    economics.add_argument("--sensitivity-prices", help="tariffs per kWh separated by commas; defaults to 0.5x/1x/1.5x base")
+    economics.add_argument("--currency", default="USD")
+    economics.add_argument("--out", help="write JSON to this path in addition to stdout")
     return parser
+
+
+def _float_values(raw: str) -> list[float]:
+    try:
+        values = [float(value.strip()) for value in raw.split(",")]
+    except ValueError as exc:
+        raise ValueError("sensitivity ranges must be comma-separated numbers") from exc
+    if not values:
+        raise ValueError("sensitivity ranges cannot be empty")
+    return values
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,12 +75,38 @@ def main(argv: list[str] | None = None) -> int:
                 intra_op_threads=args.intra_op_threads,
             )
             rendered = json.dumps(report, indent=2, sort_keys=True)
-        else:
+        elif args.command == "compare":
             from .report import comparison_warnings, load_results, render_comparison
             rows = load_results(args.results)
             for warning in comparison_warnings(rows):
                 print(f"warning: {warning}", file=sys.stderr)
             rendered = render_comparison(rows, args.format, allow_incomparable=args.allow_incomparable)
+        else:
+            from .economics import estimate_total_cost, sensitivity_grid
+            source = json.loads(Path(args.result).read_text(encoding="utf-8"))
+            if not isinstance(source, dict) or source.get("schema_version") != 1:
+                raise ValueError("economics requires a saved schema_version=1 benchmark result")
+            try:
+                rate = source["measurement"]["items_per_second"]
+                model_digest = source["model"]["sha256"]
+            except (KeyError, TypeError) as exc:
+                raise ValueError("benchmark result lacks throughput or model digest") from exc
+            assumptions = dict(
+                items_per_second=rate, device_price=args.device_price, lifespan_years=args.lifespan_years,
+                maintenance_per_year=args.maintenance_per_year, idle_watts=args.idle_watts,
+                load_watts=args.load_watts, electricity_price_per_kwh=args.electricity_price,
+                utilization=args.utilization, useful_fraction=args.useful_fraction,
+                currency=args.currency, cloud_price_per_million_calls=args.cloud_price_per_million,
+                cloud_useful_fraction=args.cloud_useful_fraction,
+            )
+            calculation = estimate_total_cost(**assumptions)
+            utilization_values = _float_values(args.sensitivity_utilizations)
+            prices = (_float_values(args.sensitivity_prices) if args.sensitivity_prices is not None
+                      else [args.electricity_price * mult for mult in (0.5, 1.0, 1.5)])
+            report = {"schema_version": 1, "report_type": "economics_tco",
+                      "source_result": args.result, "model_sha256": model_digest,
+                      "economics": calculation, "sensitivity": sensitivity_grid(assumptions, utilization_values, prices)}
+            rendered = json.dumps(report, indent=2, sort_keys=True)
         if args.out:
             output = Path(args.out)
             output.parent.mkdir(parents=True, exist_ok=True)

@@ -80,6 +80,41 @@ fixture is for pipeline correctness, not representative model accuracy or perfor
 Capture device, runtime, OS, and environment metadata alongside a real-device
 benchmark before publishing hardware conclusions.
 
+## Total ownership cost and break-even
+
+Use the separately modeled `economics` command with a saved inference run.
+It uses that run's *measured items/s* but requires **assumptions** for every
+financial, uptime, power and task-success input. Prices are in a single
+user-selected currency (no FX conversion). Example values are illustrative:
+
+```bash
+edgecostbench economics --result results/cpu.json \
+  --device-price 300 --lifespan-years 3 --maintenance-per-year 25 \
+  --idle-watts 8 --load-watts 35 --electricity-price 0.20 \
+  --utilization 0.5 --useful-fraction 0.95 \
+  --cloud-price-per-million 2 --currency USD \
+  --out results/ownership.json
+# Override the default 10/50/90% utilization and 0.5x/1x/1.5x tariff sweeps:
+edgecostbench economics --result results/cpu.json --device-price 300 \
+  --lifespan-years 3 --idle-watts 8 --load-watts 35 \
+  --electricity-price 0.20 --utilization 0.5 --useful-fraction 0.95 \
+  --sensitivity-utilizations 0.2,0.5,0.8 --sensitivity-prices 0.10,0.20,0.40
+```
+
+The model assumes the device is powered on 8,760 hours/year and runs the
+benchmark workload at the reported items/second during the specified
+utilization fraction. Annualized costs = device price / service life + annual
+maintenance + 8,760h × (idle W × (1-u) + load W × u) / 1,000 × tariff.
+Annual **useful** items = measured items/s × 8,760 × 3,600 × u ×
+user-assumed useful fraction. At zero utilization there is no cost per useful
+item (null), although owning/idle costs remain. The cloud comparator uses
+price per *million calls*, normalized by an explicit cloud useful fraction;
+if omitted, the cloud useful fraction is **assumed equal** to edge's, not
+measured. Break-even utilization is null if none exists in 0–100% load.
+This annual model excludes cooling, networking, taxes, financing, equipment
+replacement, concurrent load, and real-world validation. Never treat assumed
+useful fractions or watts as sensor measurements or accuracy scores.
+
 ## Next milestones
 
 1. **Measured energy:** opt-in NVML and external-power-meter telemetry with uncertainty/coverage and provenance.
