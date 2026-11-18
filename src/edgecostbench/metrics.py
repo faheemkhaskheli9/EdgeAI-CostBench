@@ -5,6 +5,10 @@ Regression examples (also runnable with ``python -m doctest -v``):
 >>> import math
 >>> percentile([1.0, 2.0, 3.0, 4.0], 0.5)
 2.5
+>>> percentile([-1e308, 1e308], 0.5)
+0.0
+>>> percentile([-1e308, 1e308], 0.95)
+8.999999999999999e+307
 >>> summarize_latencies([1.0, 2.0], 0.5, 1)["calls_per_second"]
 4.0
 >>> for_bad = [math.nan, math.inf, -1.0]
@@ -34,7 +38,12 @@ def percentile(values: list[float], fraction: float) -> float:
     position = (len(sorted_values) - 1) * fraction
     lower = int(position)
     upper = min(lower + 1, len(sorted_values) - 1)
-    return sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * (position - lower)
+    left, right = sorted_values[lower], sorted_values[upper]
+    weight = position - lower
+    # Opposite signs can overflow in right - left despite finite endpoints.
+    if left < 0 < right:
+        return (1 - weight) * left + weight * right
+    return left + (right - left) * weight
 
 
 def summarize_latencies(latencies_ms: list[float], elapsed_seconds: float, items_per_call: int) -> dict:
