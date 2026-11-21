@@ -16,14 +16,17 @@ def estimate_cost(mean_latency_ms: float, power_watts: float | None,
     if electricity_price_per_kwh is not None and power_watts is None:
         raise ValueError("electricity price requires --power-watts")
     # kWh = watts * milliseconds / (1000 ms/s * 3600 s/h * 1000 W/kW)
-    energy = (power_watts * mean_latency_ms / 3_600_000_000) if power_watts is not None else None
+    energy = (power_watts * (mean_latency_ms / 3_600_000_000)) if power_watts is not None else None
     price = (energy * electricity_price_per_kwh) if energy is not None and electricity_price_per_kwh is not None else None
+    per_million = price * 1_000_000 if price is not None else None
+    if any(value is not None and not isfinite(value) for value in (energy, price, per_million)):
+        raise ValueError("estimated energy or electricity cost overflow")
     return {
         "energy_measurement": None,
         "assumed_average_power_watts": power_watts,
         "estimated_kwh_per_call": energy,
         "electricity_price_per_kwh": electricity_price_per_kwh,
         "currency": currency,
-        "estimated_electricity_cost_per_million_calls": price * 1_000_000 if price is not None else None,
+        "estimated_electricity_cost_per_million_calls": per_million,
         "notes": "Power is a user assumption, not sensor telemetry. Uses mean timed call latency; excludes idle, setup, cooling, hardware and cloud fees.",
     }
